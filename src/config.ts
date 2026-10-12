@@ -33,7 +33,10 @@ export const CONFIG = {
 
   // Database defaults
   DEFAULT_DB_PORT: 3306,
-  DEFAULT_DB_ROOT_PASSWORD: `${APP_NAME}_root_secret`,
+  // The root password is deliberately not given a default. Operators must supply
+  // MYSQL_ROOT_PASSWORD (or --mysql-root-password during init) and retain it.
+  // A predictable fallback here would expose every installation to the same
+  // credential.
 
   // Traefik defaults
   DEFAULT_CERT_RESOLVER: 'myresolver',

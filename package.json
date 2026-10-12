@@ -13,7 +13,8 @@
     "start": "node dist/index.js",
     "pubctl": "./dist/pubctl",
     "run:bin": "./dist/pubctl",
-    "prepack": "pnpm run build"
+    "prepack": "pnpm run build",
+    "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "files": [
     "dist",

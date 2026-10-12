@@ -32,6 +32,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { PassThrough } from 'stream';
 import { APP_NAME, CONFIG, StorageType } from './config.js';
+import { validateDomain, validateEmail, validateTenantName } from './validation.js';
 
 const docker = new Docker({ socketPath: CONFIG.DOCKER_SOCKET_PATH });
 const program = new Command();
@@ -41,11 +42,32 @@ program
   .description('Deploy, manage, and update Ghost blogs on Docker with zero configuration')
   .version('1.0.0');
 
+function getRootPassword(): string {
+  const password = process.env.MYSQL_ROOT_PASSWORD;
+  if (!password) {
+    throw new Error('MYSQL_ROOT_PASSWORD is required. Set it to the password used with `pubctl init`.');
+  }
+  return password;
+}
+
+async function pullImage(image: string): Promise<void> {
+  const stream = await docker.pull(image);
+  await new Promise<void>((resolve, reject) => {
+    docker.modem.followProgress(stream, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+function reportFailure(spinner: ora.Ora, action: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  spinner.fail(chalk.red(`${action} failed: ${message}`));
+  process.exitCode = 1;
+}
+
 // -------------------------------------------------------------
 // Database Helper with Connection Retry
 // -------------------------------------------------------------
 async function getDbConnection(retries = 5, delayMs = 1500) {
-  const rootPassword = process.env.MYSQL_ROOT_PASSWORD || CONFIG.DEFAULT_DB_ROOT_PASSWORD;
+  const rootPassword = getRootPassword();
   let lastError: any;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -181,9 +203,13 @@ program
   .command('init')
   .description('Initialize base Docker infrastructure (Traefik SSL Proxy + MySQL)')
   .requiredOption('--email <email>', "Let's Encrypt email for automatic SSL")
+  .option('--mysql-root-password <password>', 'MySQL root password (otherwise MYSQL_ROOT_PASSWORD is used)')
   .action(async (options) => {
     const spinner = ora('Setting up base infrastructure...').start();
     try {
+      validateEmail(options.email);
+      if (options.mysqlRootPassword) process.env.MYSQL_ROOT_PASSWORD = options.mysqlRootPassword;
+      const rootPassword = getRootPassword();
       // 1. Create Docker Network
       const networks = await docker.listNetworks();
       if (!networks.some((n) => n.Name === CONFIG.NETWORK_NAME)) {
@@ -195,8 +221,7 @@ program
       const mysqlExists = containers.some((c) => c.Names.includes(`/${CONFIG.DB_CONTAINER}`));
       if (!mysqlExists) {
         spinner.text = `Pulling and starting MySQL (${CONFIG.DEFAULT_MYSQL_IMAGE})...`;
-        await docker.pull(CONFIG.DEFAULT_MYSQL_IMAGE);
-        const rootPassword = process.env.MYSQL_ROOT_PASSWORD || CONFIG.DEFAULT_DB_ROOT_PASSWORD;
+        await pullImage(CONFIG.DEFAULT_MYSQL_IMAGE);
         const mysqlContainer = await docker.createContainer({
           Image: CONFIG.DEFAULT_MYSQL_IMAGE,
           name: CONFIG.DB_CONTAINER,
@@ -205,7 +230,7 @@ program
             RestartPolicy: { Name: 'always' },
             Binds: [`${CONFIG.DB_VOLUME}:/var/lib/mysql`],
             PortBindings: {
-              [`${CONFIG.DEFAULT_DB_PORT}/tcp`]: [{ HostPort: `${CONFIG.DEFAULT_DB_PORT}` }],
+              [`${CONFIG.DEFAULT_DB_PORT}/tcp`]: [{ HostIp: '127.0.0.1', HostPort: `${CONFIG.DEFAULT_DB_PORT}` }],
             },
             NetworkMode: CONFIG.NETWORK_NAME,
           },
@@ -214,13 +239,21 @@ program
           },
         });
         await mysqlContainer.start();
+      } else {
+        const mysqlContainer = docker.getContainer(CONFIG.DB_CONTAINER);
+        const mysqlInfo = await mysqlContainer.inspect();
+        if (!mysqlInfo.State.Running) await mysqlContainer.start();
       }
+
+      // Do not report a successful init until MySQL accepts authenticated connections.
+      const db = await getDbConnection(30, 1000);
+      await db.end();
 
       // 3. Start Traefik (Auto SSL)
       const traefikExists = containers.some((c) => c.Names.includes(`/${CONFIG.PROXY_CONTAINER}`));
       if (!traefikExists) {
         spinner.text = `Configuring Traefik (${CONFIG.DEFAULT_TRAEFIK_IMAGE}) with automatic Let's Encrypt...`;
-        await docker.pull(CONFIG.DEFAULT_TRAEFIK_IMAGE);
+        await pullImage(CONFIG.DEFAULT_TRAEFIK_IMAGE);
         const traefikContainer = await docker.createContainer({
           Image: CONFIG.DEFAULT_TRAEFIK_IMAGE,
           name: CONFIG.PROXY_CONTAINER,
@@ -252,11 +285,15 @@ program
           },
         });
         await traefikContainer.start();
+      } else {
+        const traefikContainer = docker.getContainer(CONFIG.PROXY_CONTAINER);
+        const traefikInfo = await traefikContainer.inspect();
+        if (!traefikInfo.State.Running) await traefikContainer.start();
       }
 
       spinner.succeed(chalk.green('Base infrastructure is running with automated SSL support!'));
-    } catch (err: any) {
-      spinner.fail(chalk.red(`Init failed: ${err.message}`));
+    } catch (err: unknown) {
+      reportFailure(spinner, 'Init', err);
     }
   });
 
@@ -285,8 +322,13 @@ program
   .action(async (options) => {
     const { name, domain, adminEmail, title, version, storage = CONFIG.DEFAULT_STORAGE_TYPE } = options;
     const spinner = ora(`Provisioning ${domain}...`).start();
+    let container: Docker.Container | undefined;
+    let databaseProvisioned = false;
 
     try {
+      validateTenantName(name);
+      validateDomain(domain);
+      validateEmail(adminEmail);
       // 1. Storage Configuration Validation
       if (storage === 's3') {
         if (!options.s3Bucket || !options.s3Key || !options.s3Secret) {
@@ -298,6 +340,9 @@ program
       } else if (storage !== 'local') {
         throw new Error(`Unsupported storage type: '${storage}'. Supported types: 'local', 's3'.`);
       }
+      if (options.smtpHost && (!options.smtpUser || !options.smtpPass)) {
+        throw new Error('--smtp-user and --smtp-pass are required when --smtp-host is provided.');
+      }
 
       const dbName = CONFIG.getTenantDbName(name);
       const dbUser = CONFIG.getTenantDbUser(name);
@@ -308,11 +353,31 @@ program
       // 2. MySQL Database Creation
       spinner.text = 'Creating isolated database...';
       const db = await getDbConnection();
-      await db.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\`;`);
-      await db.query(`CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPassword}';`);
-      await db.query(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'%';`);
-      await db.query(`FLUSH PRIVILEGES;`);
-      await db.end();
+      try {
+        const containers = await docker.listContainers({ all: true });
+        const containerName = CONFIG.getTenantContainerName(name);
+        if (containers.some((candidate) => candidate.Names.includes(`/${containerName}`))) {
+          throw new Error(`Tenant '${name}' already has a container. Use update or delete it before creating again.`);
+        }
+        const [schemas] = await db.query(
+          'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+          [dbName]
+        );
+        if (Array.isArray(schemas) && schemas.length > 0) {
+          throw new Error(`Tenant '${name}' already has a database. Refusing to overwrite existing data.`);
+        }
+        const volumes = await docker.listVolumes();
+        if (volumes.Volumes.some((volume) => volume.Name === CONFIG.getTenantVolumeName(name))) {
+          throw new Error(`Tenant '${name}' already has a content volume. Refusing to attach existing data.`);
+        }
+        await db.query(`CREATE DATABASE \`${dbName}\`;`);
+        await db.query(`CREATE USER '${dbUser}'@'%' IDENTIFIED BY '${dbPassword}';`);
+        await db.query(`GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'%';`);
+        await db.query('FLUSH PRIVILEGES;');
+        databaseProvisioned = true;
+      } finally {
+        await db.end();
+      }
 
       // 3. Prepare Environment Variables
       const envVars = [
@@ -363,12 +428,12 @@ program
       // 4. Start Ghost Container
       const imageTag = version.includes(':') || version.includes('/') ? version : `ghost:${version}`;
       spinner.text = `Starting Ghost (${imageTag}) container...`;
-      await docker.pull(imageTag);
+      await pullImage(imageTag);
 
       const containerName = CONFIG.getTenantContainerName(name);
       const volumeName = CONFIG.getTenantVolumeName(name);
 
-      const container = await docker.createContainer({
+      container = await docker.createContainer({
         Image: imageTag,
         name: containerName,
         Env: envVars,
@@ -449,24 +514,51 @@ program
           )
         );
       }
-    } catch (err: any) {
-      spinner.fail(chalk.red(`Creation failed: ${err.message}`));
+    } catch (err: unknown) {
+      // Creation spans Docker and MySQL. Clean up resources created by this
+      // invocation so a retry cannot inherit half-configured credentials.
+      if (container) {
+        try {
+          const info = await container.inspect();
+          if (info.State.Running) await container.stop();
+          await container.remove();
+        } catch {
+          // Preserve the original provisioning error.
+        }
+      }
+      if (databaseProvisioned) {
+        try {
+          const db = await getDbConnection();
+          const dbName = CONFIG.getTenantDbName(name);
+          const dbUser = CONFIG.getTenantDbUser(name);
+          await db.query(`DROP DATABASE IF EXISTS \`${dbName}\`;`);
+          await db.query(`DROP USER IF EXISTS '${dbUser}'@'%';`);
+          await db.end();
+        } catch {
+          // Report the provisioning failure; an operator can inspect leftovers.
+        }
+      }
+      reportFailure(spinner, 'Creation', err);
     }
   });
 
 // -------------------------------------------------------------
-// COMMAND: BACKUP (Creates atomic zip of database + content)
+// COMMAND: BACKUP (Creates a paused point-in-time database + content snapshot)
 // -------------------------------------------------------------
 program
   .command('backup')
-  .description('Create an atomic backup of MySQL data and uploads')
+  .description('Create a point-in-time backup of MySQL data and uploads')
   .requiredOption('-n, --name <name>', 'Tenant name')
   .option('-o, --output <dir>', 'Destination directory', CONFIG.DEFAULT_BACKUP_DIR)
   .action(async (options) => {
     const { name, output } = options;
     const spinner = ora(`Backing up ${name}...`).start();
+    let pausedContainer: Docker.Container | undefined;
+    let isPaused = false;
+    let archiveContainer: Docker.Container | undefined;
 
     try {
+      validateTenantName(name);
       if (!fs.existsSync(output)) fs.mkdirSync(output, { recursive: true });
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupPath = path.resolve(output, `${name}_backup_${timestamp}`);
@@ -474,9 +566,22 @@ program
 
       // 1. Export MySQL Database via mysqldump inside the database container
       spinner.text = 'Dumping MySQL database...';
-      const rootPassword = process.env.MYSQL_ROOT_PASSWORD || CONFIG.DEFAULT_DB_ROOT_PASSWORD;
+      const rootPassword = getRootPassword();
       const mysqlContainer = docker.getContainer(CONFIG.DB_CONTAINER);
       const dbName = CONFIG.getTenantDbName(name);
+
+      // Fetch the helper image before pausing the publication so an uncached
+      // image cannot turn a short snapshot into an extended outage.
+      await pullImage(CONFIG.DEFAULT_BACKUP_IMAGE);
+
+      // Pausing the tenant makes the database and its content volume a single
+      // point-in-time snapshot. It is resumed in both success and failure paths.
+      pausedContainer = await findTenantContainer(name);
+      const tenantInfo = await pausedContainer.inspect();
+      if (tenantInfo.State.Running) {
+        await pausedContainer.pause();
+        isPaused = true;
+      }
 
       const exec = await mysqlContainer.exec({
         Cmd: ['mysqldump', '-u', 'root', `-p${rootPassword}`, dbName],
@@ -510,7 +615,7 @@ program
         ? volumeName
         : `ghost-content-${name}`;
 
-      const archiveContainer = await docker.createContainer({
+      archiveContainer = await docker.createContainer({
         Image: CONFIG.DEFAULT_BACKUP_IMAGE,
         Cmd: ['tar', '-czf', '/backup/content.tar.gz', '-C', '/data', '.'],
         HostConfig: {
@@ -520,47 +625,71 @@ program
 
       await archiveContainer.start();
       const waitResult = await archiveContainer.wait();
-      await archiveContainer.remove();
 
       if (waitResult.StatusCode !== 0) {
         throw new Error(`Content volume archiving failed with exit code ${waitResult.StatusCode}`);
       }
 
       spinner.succeed(chalk.green(`Backup created at: ${backupPath}`));
-    } catch (err: any) {
-      spinner.fail(chalk.red(`Backup failed: ${err.message}`));
+    } catch (err: unknown) {
+      reportFailure(spinner, 'Backup', err);
+    } finally {
+      if (archiveContainer) {
+        try {
+          await archiveContainer.remove({ force: true });
+        } catch {
+          // Best-effort cleanup of the short-lived archiver.
+        }
+      }
+      if (pausedContainer && isPaused) {
+        try {
+          await pausedContainer.unpause();
+        } catch {
+          process.exitCode = 1;
+          console.error(chalk.red('Backup warning: the tenant could not be resumed; inspect it with Docker immediately.'));
+        }
+      }
     }
   });
 
 // -------------------------------------------------------------
-// COMMAND: UPDATE (Safe rolling image updates)
+// COMMAND: UPDATE (Recoverable restart image updates)
 // -------------------------------------------------------------
 program
   .command('update')
-  .description('Update a site to a newer Ghost version')
+  .description('Update a site to a newer Ghost version with automatic rollback on failure')
   .requiredOption('-n, --name <name>', 'Tenant name')
   .requiredOption('-t, --to <version>', 'Target Ghost image tag (e.g. 6-alpine, 5-alpine)')
   .action(async (options) => {
     const { name, to: newVersion } = options;
     const spinner = ora(`Updating ${name} to ghost:${newVersion}...`).start();
+    let oldContainer: Docker.Container | undefined;
+    let oldContainerName: string | undefined;
+    let rollbackName: string | undefined;
+    let replacement: Docker.Container | undefined;
 
     try {
-      const oldContainer = await findTenantContainer(name);
+      validateTenantName(name);
+      oldContainer = await findTenantContainer(name);
       const info = await oldContainer.inspect();
       const containerName = info.Name.replace(/^\//, '');
+      oldContainerName = containerName;
 
       // Pull new image
       const imageTag =
         newVersion.includes(':') || newVersion.includes('/') ? newVersion : `ghost:${newVersion}`;
       spinner.text = `Pulling ${imageTag}...`;
-      await docker.pull(imageTag);
+      await pullImage(imageTag);
 
-      // Stop & remove old container (Volume and DB remain intact)
-      spinner.text = 'Swapping container...';
-      await oldContainer.stop();
-      await oldContainer.remove();
+      // Docker cannot run two containers with the same name. Rename the old
+      // container instead of deleting it so it can be restored if replacement
+      // creation or startup fails.
+      spinner.text = 'Creating recoverable container swap...';
+      rollbackName = `${containerName}-rollback-${Date.now()}`;
+      if (info.State.Running) await oldContainer.stop();
+      await oldContainer.rename({ name: rollbackName });
 
-      const newContainer = await docker.createContainer({
+      replacement = await docker.createContainer({
         Image: imageTag,
         name: containerName,
         Env: info.Config.Env,
@@ -571,10 +700,29 @@ program
         },
       });
 
-      await newContainer.start();
+      await replacement.start();
+      await oldContainer.remove();
       spinner.succeed(chalk.green(`Successfully updated ${name} to ${imageTag}!`));
-    } catch (err: any) {
-      spinner.fail(chalk.red(`Update failed: ${err.message}`));
+    } catch (err: unknown) {
+      // Roll back the old container whenever it still exists. This cannot be
+      // zero-downtime because Docker names/routes are shared, but it avoids a
+      // failed update permanently taking a publication offline.
+      if (replacement) {
+        try {
+          const replacementInfo = await replacement.inspect();
+          if (replacementInfo.State.Running) await replacement.stop();
+          await replacement.remove();
+        } catch {}
+      }
+      if (oldContainer && oldContainerName && rollbackName) {
+        try {
+          await oldContainer.rename({ name: oldContainerName });
+          await oldContainer.start();
+        } catch {
+          console.error(chalk.red('Rollback failed; the previous container is retained under its rollback name.'));
+        }
+      }
+      reportFailure(spinner, 'Update', err);
     }
   });
 
@@ -591,6 +739,7 @@ program
     const spinner = ora(`Deleting ${name}...`).start();
 
     try {
+      validateTenantName(name);
       try {
         const container = await findTenantContainer(name);
         await container.stop();
@@ -627,8 +776,8 @@ program
       }
 
       spinner.succeed(chalk.green(`Site ${name} removed.`));
-    } catch (err: any) {
-      spinner.fail(chalk.red(`Deletion failed: ${err.message}`));
+    } catch (err: unknown) {
+      reportFailure(spinner, 'Deletion', err);
     }
   });
 

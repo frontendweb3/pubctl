@@ -63,6 +63,47 @@ function reportFailure(spinner: ora.Ora, action: string, err: unknown): void {
   process.exitCode = 1;
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+}
+
+async function waitForGhostReady(container: Docker.Container, timeoutMs = 90_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = 'Ghost did not respond';
+  while (Date.now() < deadline) {
+    const info = await container.inspect();
+    if (!info.State.Running) throw new Error('Replacement Ghost container exited before becoming ready.');
+    const ip = info.NetworkSettings?.Networks?.[CONFIG.NETWORK_NAME]?.IPAddress;
+    if (ip) {
+      try {
+        const response = await fetchWithTimeout(`http://${ip}:2368/`, { method: 'GET' }, 5_000);
+        if (response.ok || (response.status >= 300 && response.status < 400)) return;
+        lastError = `Ghost returned HTTP ${response.status}`;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw new Error(`Ghost did not become ready within ${timeoutMs / 1000}s: ${lastError}`);
+}
+
+function mysqlIsLocalOnly(info: Docker.ContainerInspectInfo): boolean {
+  const bindings = info.HostConfig.PortBindings?.[`${CONFIG.DEFAULT_DB_PORT}/tcp`];
+  return Array.isArray(bindings) && bindings.length > 0 && bindings.every((binding) => binding.HostIp === '127.0.0.1');
+}
+
+async function removeVolumeIfPresent(name: string): Promise<void> {
+  const volume = docker.getVolume(name);
+  try {
+    await volume.inspect();
+  } catch (err: any) {
+    if (err?.statusCode === 404) return;
+    throw err;
+  }
+  await volume.remove();
+}
+
 // -------------------------------------------------------------
 // Database Helper with Connection Retry
 // -------------------------------------------------------------
@@ -204,10 +245,18 @@ program
   .description('Initialize base Docker infrastructure (Traefik SSL Proxy + MySQL)')
   .requiredOption('--email <email>', "Let's Encrypt email for automatic SSL")
   .option('--mysql-root-password <password>', 'MySQL root password (otherwise MYSQL_ROOT_PASSWORD is used)')
+  .option('--rotate-mysql-root-password', 'Rotate the existing root password using PUBCTL_NEW_ROOT_PASSWORD; MYSQL_ROOT_PASSWORD must contain the current password')
   .action(async (options) => {
     const spinner = ora('Setting up base infrastructure...').start();
     try {
       validateEmail(options.email);
+      const newRootPassword = process.env.PUBCTL_NEW_ROOT_PASSWORD;
+      if (options.mysqlRootPassword && options.rotateMysqlRootPassword) {
+        throw new Error('Use either --mysql-root-password or --rotate-mysql-root-password, not both.');
+      }
+      if (options.rotateMysqlRootPassword && !newRootPassword) {
+        throw new Error('PUBCTL_NEW_ROOT_PASSWORD is required with --rotate-mysql-root-password.');
+      }
       if (options.mysqlRootPassword) process.env.MYSQL_ROOT_PASSWORD = options.mysqlRootPassword;
       const rootPassword = getRootPassword();
       // 1. Create Docker Network
@@ -242,11 +291,47 @@ program
       } else {
         const mysqlContainer = docker.getContainer(CONFIG.DB_CONTAINER);
         const mysqlInfo = await mysqlContainer.inspect();
-        if (!mysqlInfo.State.Running) await mysqlContainer.start();
+        const usesLegacyDefault = mysqlInfo.Config.Env?.includes('MYSQL_ROOT_PASSWORD=pubctl_root_secret');
+        if (usesLegacyDefault && !options.rotateMysqlRootPassword) {
+          throw new Error('Existing MySQL uses the retired default root password. Rotate it before continuing; this command will not silently retain an insecure credential.');
+        }
+        if (!mysqlIsLocalOnly(mysqlInfo)) {
+          spinner.text = 'Repairing MySQL localhost-only port binding...';
+          if (mysqlInfo.State.Running) await mysqlContainer.stop();
+          await mysqlContainer.remove();
+          const repairedMysql = await docker.createContainer({
+            Image: mysqlInfo.Config.Image,
+            name: CONFIG.DB_CONTAINER,
+            Env: mysqlInfo.Config.Env,
+            HostConfig: {
+              RestartPolicy: mysqlInfo.HostConfig.RestartPolicy,
+              Binds: mysqlInfo.HostConfig.Binds,
+              PortBindings: {
+                [`${CONFIG.DEFAULT_DB_PORT}/tcp`]: [{ HostIp: '127.0.0.1', HostPort: `${CONFIG.DEFAULT_DB_PORT}` }],
+              },
+              NetworkMode: CONFIG.NETWORK_NAME,
+            },
+            Labels: { ...mysqlInfo.Config.Labels, [CONFIG.LABELS.MANAGED_BY]: APP_NAME },
+          });
+          await repairedMysql.start();
+        } else if (!mysqlInfo.State.Running) {
+          await mysqlContainer.start();
+        }
       }
 
       // Do not report a successful init until MySQL accepts authenticated connections.
       const db = await getDbConnection(30, 1000);
+      if (options.rotateMysqlRootPassword) {
+        const [rootUsers] = await db.query('SELECT Host FROM mysql.user WHERE User = ?', ['root']);
+        if (!Array.isArray(rootUsers) || rootUsers.length === 0) {
+          throw new Error('Could not find a MySQL root account to rotate.');
+        }
+        for (const rootUser of rootUsers as Array<{ Host: string }>) {
+          const host = rootUser.Host.replace(/'/g, "''");
+          await db.query(`ALTER USER 'root'@'${host}' IDENTIFIED BY ?`, [newRootPassword]);
+        }
+        process.env.MYSQL_ROOT_PASSWORD = newRootPassword;
+      }
       await db.end();
 
       // 3. Start Traefik (Auto SSL)
@@ -467,7 +552,7 @@ program
         for (let attempt = 0; attempt < 30; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 2000));
           try {
-            const res = await fetch(`http://${internalIp}:2368/ghost/api/admin/authentication/setup/`, {
+            const res = await fetchWithTimeout(`http://${internalIp}:2368/ghost/api/admin/authentication/setup/`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -480,7 +565,7 @@ program
                   },
                 ],
               }),
-            });
+            }, 5_000);
             if (res.ok) {
               setupSuccess = true;
               break;
@@ -489,6 +574,10 @@ program
             // Ghost is still performing Knex database migrations; keep polling
           }
         }
+      }
+
+      if (!setupSuccess) {
+        throw new Error('Ghost did not complete automated administrator setup within 60 seconds; the deployment was rolled back.');
       }
 
       spinner.succeed(chalk.green(`Site ${name} deployed successfully!`));
@@ -505,15 +594,6 @@ program
       );
       console.log(chalk.bold.cyan('===================================================='));
 
-      if (!setupSuccess) {
-        console.log(
-          chalk.yellow(
-            '\nNote: Automatic login injection timed out. Please visit https://' +
-              domain +
-              '/ghost/#/setup to finish setting your password.'
-          )
-        );
-      }
     } catch (err: unknown) {
       // Creation spans Docker and MySQL. Clean up resources created by this
       // invocation so a retry cannot inherit half-configured credentials.
@@ -701,6 +781,8 @@ program
       });
 
       await replacement.start();
+      spinner.text = 'Waiting for the replacement to become healthy...';
+      await waitForGhostReady(replacement);
       await oldContainer.remove();
       spinner.succeed(chalk.green(`Successfully updated ${name} to ${imageTag}!`));
     } catch (err: unknown) {
@@ -742,10 +824,11 @@ program
       validateTenantName(name);
       try {
         const container = await findTenantContainer(name);
-        await container.stop();
+        const containerInfo = await container.inspect();
+        if (containerInfo.State.Running) await container.stop();
         await container.remove();
-      } catch {
-        // Container might already be stopped/deleted
+      } catch (err: any) {
+        if (err?.statusCode !== 404) throw err;
       }
 
       if (!keepData) {
@@ -764,15 +847,8 @@ program
 
         spinner.text = 'Removing content volume...';
         const primaryVol = CONFIG.getTenantVolumeName(name);
-        try {
-          const volume = docker.getVolume(primaryVol);
-          await volume.remove();
-        } catch {
-          try {
-            const legacyVol = docker.getVolume(`ghost-content-${name}`);
-            await legacyVol.remove();
-          } catch {}
-        }
+        await removeVolumeIfPresent(primaryVol);
+        await removeVolumeIfPresent(`ghost-content-${name}`);
       }
 
       spinner.succeed(chalk.green(`Site ${name} removed.`));

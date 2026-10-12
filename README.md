@@ -93,6 +93,16 @@ export MYSQL_ROOT_PASSWORD="$(openssl rand -base64 32)"
 pubctl init --email admin@example.com
 ```
 
+If upgrading an installation created by an older release, use the current root password in `MYSQL_ROOT_PASSWORD` and rotate it in the same command:
+
+```bash
+PUBCTL_NEW_ROOT_PASSWORD="$(openssl rand -base64 32)"
+export MYSQL_ROOT_PASSWORD="the-current-password"
+export PUBCTL_NEW_ROOT_PASSWORD
+pubctl init --email admin@example.com --rotate-mysql-root-password
+export MYSQL_ROOT_PASSWORD="$PUBCTL_NEW_ROOT_PASSWORD"
+```
+
 ### 2. Deploy a Site (Local Storage)
 
 Deploy a new publication with automated database provisioning and admin credentials:

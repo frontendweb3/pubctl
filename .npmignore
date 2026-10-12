@@ -1,0 +1,37 @@
+# Source files (only compiled dist/ is distributed via npm)
+src/
+tsconfig.json
+
+# Exclude heavy standalone Bun binaries from npm package (Node/npm only needs dist/index.js)
+dist/pubctl*
+release-binaries/
+
+# Dockerfile & standalone installation scripts
+Dockerfile*
+install.sh
+
+# CI/CD and repository configs
+.github/
+.gitignore
+.npmignore
+.todo
+
+# Package manager lockfiles & workspace files
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# Backups & local runtime artifacts
+backups/
+*.sql
+*.tar.gz
+
+# Environment variables & secrets
+.env
+.env.*
+
+# Logs & Editor configs
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -10,7 +10,7 @@
 > [!IMPORTANT]
 > **Beta Stage Notice**: `pubctl` is currently in active beta. Core orchestration features (Traefik SSL, isolated MySQL, S3 storage, backups, and standalone binary execution) are operational, but commands, flags, and configuration formats may evolve before the stable v1.0 release. Please report issues, feedback, or feature requests on GitHub!
 
-`pubctl` automates the entire lifecycle of multi-tenant Ghost CMS instances on a single virtual server (AWS EC2, Hetzner, DigitalOcean, Linode, etc.). It orchestrates automatic Let's Encrypt SSL certificates via Traefik v3, per-tenant isolated MySQL 8.0 databases, S3-compatible cloud media storage, automated zero-touch administrative provisioning, atomic database/content backups, and rolling updates.
+`pubctl` automates the lifecycle of multi-tenant Ghost CMS instances on a single virtual server (AWS EC2, Hetzner, DigitalOcean, Linode, etc.). It orchestrates automatic Let's Encrypt SSL certificates via Traefik v3, per-tenant isolated MySQL 8.0 databases, S3-compatible cloud media storage, automated zero-touch administrative provisioning, point-in-time backups, and recoverable restart updates.
 
 ---
 
@@ -20,8 +20,8 @@
 - 🗄️ **Multi-Tenant Database Isolation**: Automatically creates dedicated databases and restricted MySQL users per blog.
 - ☁️ **S3 / Cloudflare R2 Media Offloading**: Seamless support for AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces to keep local disk usage minimal.
 - 🔑 **Headless Zero-Touch Setup**: Automatically bootstraps the Ghost admin account and password, bypassing manual setup screens.
-- 📦 **Atomic Backups**: Dumps MySQL databases and content volumes into timestamped archive directories.
-- 🔄 **Safe Rolling Updates**: Updates Ghost Docker image versions without downtime or data loss.
+- 📦 **Point-in-Time Backups**: Temporarily pauses a tenant while its MySQL dump and content archive are created.
+- 🔄 **Recoverable Updates**: Restores the previous container automatically if a replacement fails to start.
 - 🚀 **Zero Runtime Dependencies**: Distributed as a single, self-contained native binary compiled with Bun—no Node.js or npm required on target hosts.
 
 ---
@@ -73,8 +73,12 @@ sudo mv pubctl /usr/local/bin/
    ```bash
    docker --version
    ```
-2. **Ports 80 & 443**: Available on the host for Traefik to bind and issue Let's Encrypt SSL certificates.
-3. **DNS Records**: Point your domain or subdomains (A / AAAA records) to your server's public IP address.
+2. **MySQL Root Password**: Generate and retain a strong password before initialization. It must also be available to later `create`, `backup`, and `delete` commands:
+   ```bash
+   export MYSQL_ROOT_PASSWORD="$(openssl rand -base64 32)"
+   ```
+3. **Ports 80 & 443**: Available on the host for Traefik to bind and issue Let's Encrypt SSL certificates.
+4. **DNS Records**: Point your domain or subdomains (A / AAAA records) to your server's public IP address.
 
 ---
 
@@ -85,6 +89,7 @@ sudo mv pubctl /usr/local/bin/
 Run this once on a fresh server to launch the shared Docker bridge network, Traefik SSL proxy, and MySQL 8.0 container:
 
 ```bash
+export MYSQL_ROOT_PASSWORD="$(openssl rand -base64 32)"
 pubctl init --email admin@example.com
 ```
 
@@ -178,7 +183,7 @@ pubctl create [options]
 
 ### `pubctl backup`
 
-Creates an atomic snapshot containing the MySQL database dump (`db.sql`) and a gzipped tarball of the persistent content volume (`content.tar.gz`).
+Creates a point-in-time snapshot by pausing the tenant while it writes the MySQL dump (`db.sql`) and gzipped content archive (`content.tar.gz`).
 
 ```bash
 pubctl backup -n <name> [-o <output_dir>]
@@ -193,7 +198,7 @@ pubctl backup -n <name> [-o <output_dir>]
 
 ### `pubctl update`
 
-Performs a safe rolling container swap to upgrade Ghost versions while preserving database data, environment credentials, and storage volumes.
+Performs a recoverable restart update while preserving database data, environment credentials, and storage volumes. If the replacement fails, the prior container is restored automatically.
 
 ```bash
 pubctl update -n <name> -t <version>

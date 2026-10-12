@@ -61,7 +61,7 @@ This document details the architectural design of `pubctl`, explaining how it or
 
 ### B. Shared Isolated Database Server (`pubctl-mysql`)
 - Single **MySQL 8.0** server listening internally on `pubctl-net`.
-- Port 3306 is bounded to localhost (`127.0.0.1:3306`) for CLI management tasks and is **never** accessible over the public network interface.
+- Port 3306 is bound to localhost (`127.0.0.1:3306`) for CLI management tasks and is **never** accessible over the public network interface. The root password must be supplied through `MYSQL_ROOT_PASSWORD`; it has no built-in default.
 - Each tenant receives:
   - An isolated database: `pubctl_<tenant_name>`
   - A unique user: `usr_<tenant_name>` with a randomly generated 32-character hexadecimal password.

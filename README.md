@@ -8,7 +8,7 @@
 [![Bun](https://img.shields.io/badge/Bun-Compiled_Binary-fbf0df?logo=bun&logoColor=black)](#installation)
 
 > [!IMPORTANT]
-> **Beta Stage Notice**: `pubctl` is currently in active beta. Core orchestration features (Traefik SSL, isolated MySQL, S3 storage, backups, and standalone binary execution) are operational, but commands, flags, and configuration formats may evolve before the stable v1.0 release. Please report issues, feedback, or feature requests on GitHub!
+> **Beta Stage Notice**: `pubctl` is currently in active beta. Core orchestration features (Traefik SSL, isolated MySQL, S3 storage, backups, and standalone binary execution) are operational, but commands, flags, and configuration formats may evolve before the stable release. Please report issues, feedback, or feature requests on GitHub!
 
 `pubctl` automates the lifecycle of multi-tenant Ghost CMS instances on a single virtual server (AWS EC2, Hetzner, DigitalOcean, Linode, etc.). It orchestrates automatic Let's Encrypt SSL certificates via Traefik v3, per-tenant isolated MySQL 8.0 databases, S3-compatible cloud media storage, automated zero-touch administrative provisioning, point-in-time backups, and recoverable restart updates.
 

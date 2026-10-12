@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# ==============================================================================
+# Production Ghost Image with S3-Compatible Storage Adapter
+# ==============================================================================
+# This Dockerfile builds a production-ready Ghost CMS container image bundled
+# with the `ghost-storage-adapter-s3` plugin for AWS S3, Cloudflare R2, MinIO,
+# and DigitalOcean Spaces support.
+#
+# Supports:
+#   - Ghost 6 (Default): ARG GHOST_VERSION=6-alpine
+#   - Ghost 5 (Legacy):  ARG GHOST_VERSION=5-alpine
+#
+# Ghost requires storage adapters to be located inside the content directory:
+#   /var/lib/ghost/content/adapters/storage/<adapter-name>/index.js
+#
+# Build commands:
+#   # Default (Ghost 6):
+#   docker build -t pubctl-ghost:6-s3 -f Dockerfile.ghost-s3 .
+#
+#   # Legacy (Ghost 5):
+#   docker build --build-arg GHOST_VERSION=5-alpine -t pubctl-ghost:5-s3 -f Dockerfile.ghost-s3 .
+#
+# Usage with pubctl:
+#   pubctl create \
+#     --name myblog \
+#     --domain blog.example.com \
+#     --admin-email admin@example.com \
+#     --version pubctl-ghost:6-s3 \
+#     --storage s3 \
+#     --s3-bucket my-ghost-bucket \
+#     --s3-key MY_ACCESS_KEY_ID \
+#     --s3-secret MY_SECRET_KEY \
+#     --s3-endpoint https://<account_id>.r2.cloudflarestorage.com
+# ==============================================================================
+
+ARG GHOST_VERSION=6-alpine
+FROM ghost:${GHOST_VERSION}
+
+# Define the target adapter directory
+ENV ADAPTER_DIR=/var/lib/ghost/content/adapters/storage/s3
+
+USER root
+
+# Install ghost-storage-adapter-s3
+RUN mkdir -p ${ADAPTER_DIR} && \
+    cd ${ADAPTER_DIR} && \
+    npm init -y && \
+    npm install --no-save ghost-storage-adapter-s3 && \
+    echo "module.exports = require('ghost-storage-adapter-s3');" > ${ADAPTER_DIR}/index.js && \
+    chown -R node:node /var/lib/ghost/content
+
+# Switch back to non-root Ghost node user
+USER node
+
+EXPOSE 2368
+CMD ["node", "current/index.js"]

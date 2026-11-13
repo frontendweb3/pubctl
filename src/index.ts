@@ -31,16 +31,17 @@ import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { PassThrough } from 'stream';
-import { APP_NAME, CONFIG, StorageType } from './config.js';
+import { APP_NAME, CONFIG } from './config.js';
 import { validateDomain, validateEmail, validateTenantName } from './validation.js';
 
 const docker = new Docker({ socketPath: CONFIG.DOCKER_SOCKET_PATH });
 const program = new Command();
+const { version } = require('../package.json');
 
 program
   .name(APP_NAME)
   .description('Deploy, manage, and update Ghost blogs on Docker with zero configuration')
-  .version('1.0.0');
+  .version(version);
 
 function getRootPassword(): string {
   const password = process.env.MYSQL_ROOT_PASSWORD;

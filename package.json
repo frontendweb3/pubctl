@@ -2,6 +2,31 @@
   "name": "pubctl",
   "version": "1.0.0",
   "description": "Zero-config Docker orchestrator for Ghost CMS",
+  "license": "MIT",
+  "author": "Rajdeep Singh",
+  "homepage": "https://github.com/officialrajdeepsingh/pubctl#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/officialrajdeepsingh/pubctl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/officialrajdeepsingh/pubctl/issues"
+  },
+  "keywords": [
+    "ghost",
+    "ghost-cms",
+    "docker",
+    "traefik",
+    "orchestrator",
+    "cli",
+    "devops",
+    "self-hosted",
+    "mysql",
+    "s3"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "bin": {
     "pubctl": "./dist/index.js"
   },
@@ -20,7 +45,7 @@
     "dist",
     "!dist/pubctl*",
     "README.md",
-    "docs"
+    "LICENSE"
   ],
   "dependencies": {
     "chalk": "^4.1.2",

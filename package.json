@@ -1,6 +1,6 @@
 {
   "name": "pubctl",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Zero-config Docker orchestrator for Ghost CMS",
   "license": "MIT",
   "author": "Rajdeep Singh",
@@ -28,7 +28,7 @@
     "node": ">=18.0.0"
   },
   "bin": {
-    "pubctl": "./dist/index.js"
+    "pubctl": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",

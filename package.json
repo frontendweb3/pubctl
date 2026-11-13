@@ -1,6 +1,6 @@
 {
   "name": "pubctl",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Zero-config Docker orchestrator for Ghost CMS",
   "license": "MIT",
   "author": "Rajdeep Singh",

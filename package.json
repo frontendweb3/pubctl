@@ -1,16 +1,16 @@
 {
   "name": "pubctl",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zero-config Docker orchestrator for Ghost CMS",
   "license": "MIT",
   "author": "Rajdeep Singh",
-  "homepage": "https://github.com/officialrajdeepsingh/pubctl#readme",
+  "homepage": "https://github.com/frontendweb3/pubctl#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/officialrajdeepsingh/pubctl.git"
+    "url": "git+https://github.com/frontendweb3/pubctl.git"
   },
   "bugs": {
-    "url": "https://github.com/officialrajdeepsingh/pubctl/issues"
+    "url": "https://github.com/frontendweb3/pubctl/issues"
   },
   "keywords": [
     "ghost",

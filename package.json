@@ -22,7 +22,9 @@
     "devops",
     "self-hosted",
     "mysql",
-    "s3"
+    "s3",
+    "deploy-ghost-cms",
+    "deploy-ghost"
   ],
   "engines": {
     "node": ">=18.0.0"
@@ -31,32 +33,28 @@
     "pubctl": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
-    "compile": "bun build --compile --minify --external cpu-features --outfile=dist/pubctl src/index.ts",
-    "compile:linux-x64": "bun build --compile --target=bun-linux-x64 --minify --external cpu-features --outfile=dist/pubctl src/index.ts",
+
+    "typecheck": "tsc --noEmit",
+    "build": "rm -rf dist && tsc --noEmit && bun build src/index.ts --target=node --outfile=dist/index.js --minify --external cpu-features",
+    "bundle": "bun build src/index.ts --target=node --outfile=dist/index.js --minify --external cpu-features",
     "dev": "bun run src/index.ts",
     "start": "node dist/index.js",
-    "pubctl": "./dist/pubctl",
-    "run:bin": "./dist/pubctl",
     "prepack": "pnpm run build",
-    "test": "pnpm run build && node --test test/*.test.mjs"
+    "test": "bun test test/*.test.mjs"
   },
   "files": [
-    "dist",
-    "!dist/pubctl*",
+    "dist/index.js",
     "README.md",
     "LICENSE"
   ],
-  "dependencies": {
+  "devDependencies": {
+    "@types/dockerode": "^3.3.29",
+    "@types/node": "^20.0.0",
     "chalk": "^4.1.2",
     "commander": "^12.0.0",
     "dockerode": "^4.0.2",
     "mysql2": "^3.9.0",
-    "ora": "^5.4.1"
-  },
-  "devDependencies": {
-    "@types/dockerode": "^3.3.29",
-    "@types/node": "^20.0.0",
+    "ora": "^5.4.1",
     "typescript": "^5.4.0"
   }
 }

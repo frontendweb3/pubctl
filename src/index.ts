@@ -6,11 +6,10 @@
  *
  * Runtime & Compilation Compatibility:
  * ------------------------------------
- * - Standalone Binary (Bun):
- *     Compiled with `bun build --compile --target=bun-linux-x64 --external cpu-features ...`
- *     to produce a single, self-contained ELF executable with zero runtime dependencies.
- * - Node.js Fallback:
- *     Compatible with Node.js 18+ (NodeNext ESM) via `tsc` -> `node dist/index.js` or `tsx`.
+ * - Bundled Node.js CLI:
+ *     Bundled into a single, self-contained JavaScript executable via:
+ *     `bun build src/index.ts --target=node --outfile=dist/index.js --minify --external cpu-features`
+ *     with zero runtime subdependencies.
  *
  * Storage Architecture:
  * ---------------------
@@ -36,12 +35,14 @@ import { validateDomain, validateEmail, validateTenantName } from './validation.
 
 const docker = new Docker({ socketPath: CONFIG.DOCKER_SOCKET_PATH });
 const program = new Command();
-const { version } = require('../package.json');
+import { version } from '../package.json';
 
 program
   .name(APP_NAME)
   .description('Deploy, manage, and update Ghost blogs on Docker with zero configuration')
-  .version(version);
+  .version(version, '-v, -V, --version', 'output the version number')
+  .showHelpAfterError('(run with --help for available commands and options)')
+  .showSuggestionAfterError();
 
 function getRootPassword(): string {
   const password = process.env.MYSQL_ROOT_PASSWORD;
@@ -858,4 +859,18 @@ program
     }
   });
 
-program.parse(process.argv);
+if (process.argv.slice(2).length === 0) {
+  program.outputHelp();
+  process.exit(0);
+}
+
+program.exitOverride();
+
+try {
+  program.parse(process.argv);
+} catch (err: any) {
+  if (err?.code?.startsWith('commander.')) {
+    process.exit(0);
+  }
+  throw err;
+}

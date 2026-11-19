@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # pubctl installer script
-# Installs standalone binary without requiring Node.js, Bun, or npm.
+# Installs pubctl CLI globally using pnpm, bun, or npm.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/officialrajdeepsingh/pubctl/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/frontendweb3/pubctl/main/install.sh | bash
 #
 # Environment variables:
-#   PUBCTL_REPO         GitHub repository (default: officialrajdeepsingh/pubctl)
-#   PUBCTL_VERSION      Release tag (default: latest)
-#   PUBCTL_INSTALL_DIR  Target installation directory (default: /usr/local/bin)
+#   PUBCTL_VERSION      npm version or tag (default: latest)
 # ==============================================================================
 
 set -euo pipefail
@@ -32,111 +30,70 @@ if [ ! -t 1 ]; then
   NC=''
 fi
 
-REPO="${PUBCTL_REPO:-officialrajdeepsingh/pubctl}"
+PACKAGE_NAME="pubctl"
 VERSION="${PUBCTL_VERSION:-latest}"
-INSTALL_DIR="${PUBCTL_INSTALL_DIR:-/usr/local/bin}"
-BINARY_NAME="pubctl"
 
-printf "${BOLD}${BLUE}==> Installing pubctl (Zero-config Ghost Docker Orchestrator)...${NC}\n"
+printf "${BOLD}${BLUE}==> Installing ${PACKAGE_NAME} (Zero-config Ghost Docker Orchestrator)...${NC}\n"
 
-# 1. Detect Operating System
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-case "${OS}" in
-  linux*)  OS_TARGET="linux" ;;
-  darwin*) OS_TARGET="darwin" ;;
-  *)
-    printf "${RED}Error: Unsupported operating system '${OS}'. Only Linux and macOS are supported.${NC}\n" >&2
-    exit 1
-    ;;
-esac
+# 1. Verify Node.js or Bun runtime is available
+HAS_NODE=false
+HAS_BUN=false
 
-# 2. Detect CPU Architecture
-ARCH="$(uname -m)"
-case "${ARCH}" in
-  x86_64|amd64)   ARCH_TARGET="x64" ;;
-  arm64|aarch64)  ARCH_TARGET="arm64" ;;
-  *)
-    printf "${RED}Error: Unsupported architecture '${ARCH}'. Supported: x86_64, arm64.${NC}\n" >&2
-    exit 1
-    ;;
-esac
-
-ASSET_NAME="pubctl-${OS_TARGET}-${ARCH_TARGET}"
-printf "    Detected platform: ${BOLD}${OS_TARGET}-${ARCH_TARGET}${NC}\n"
-
-# 3. Build Download URL
-if [ "${VERSION}" = "latest" ]; then
-  DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${ASSET_NAME}"
-else
-  DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET_NAME}"
+if command -v node >/dev/null 2>&1; then
+  NODE_MAJOR=$(node -v | sed 's/v//' | cut -d. -f1)
+  if [ "${NODE_MAJOR}" -ge 18 ]; then
+    HAS_NODE=true
+    printf "    Found Node.js: ${BOLD}$(node -v)${NC}\n"
+  else
+    printf "${YELLOW}! Warning: Node.js version $(node -v) is older than 18.0.0. pubctl requires Node.js 18+ or Bun.${NC}\n"
+  fi
 fi
 
-# 4. Download Binary to Temporary Location
-TMP_DIR="$(mktemp -d)"
-TMP_FILE="${TMP_DIR}/pubctl"
+if command -v bun >/dev/null 2>&1; then
+  HAS_BUN=true
+  printf "    Found Bun: ${BOLD}$(bun -v)${NC}\n"
+fi
 
-cleanup() {
-  rm -rf "${TMP_DIR}"
-}
-trap cleanup EXIT
-
-printf "    Downloading from: ${DOWNLOAD_URL}...\n"
-if command -v curl >/dev/null 2>&1; then
-  if ! curl -fSL# "${DOWNLOAD_URL}" -o "${TMP_FILE}"; then
-    printf "${RED}Error: Failed to download binary. Please ensure release exists at ${DOWNLOAD_URL}${NC}\n" >&2
-    exit 1
-  fi
-elif command -v wget >/dev/null 2>&1; then
-  if ! wget -q --show-progress "${DOWNLOAD_URL}" -O "${TMP_FILE}"; then
-    printf "${RED}Error: Failed to download binary via wget.${NC}\n" >&2
-    exit 1
-  fi
-else
-  printf "${RED}Error: Neither curl nor wget was found on your system.${NC}\n" >&2
+if [ "${HAS_NODE}" = false ] && [ "${HAS_BUN}" = false ]; then
+  printf "${RED}Error: Neither Node.js (>= 18) nor Bun was found on your system.${NC}\n" >&2
+  printf "Please install Node.js 18+ (https://nodejs.org) or Bun (https://bun.sh) and rerun this installer.\n" >&2
   exit 1
 fi
 
-chmod +x "${TMP_FILE}"
+# 2. Install globally using detected package manager
+INSTALLED=false
 
-# 5. Determine Destination Directory & Permissions
-USE_SUDO=""
-if [ ! -w "${INSTALL_DIR}" ]; then
-  if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
-      USE_SUDO="sudo"
-    else
-      # Fallback to user-local directory if sudo not available
-      INSTALL_DIR="${HOME}/.local/bin"
-      mkdir -p "${INSTALL_DIR}"
-    fi
+if command -v pnpm >/dev/null 2>&1; then
+  printf "    Installing globally via ${BOLD}pnpm${NC}...\n"
+  if pnpm add -g "${PACKAGE_NAME}@${VERSION}"; then
+    INSTALLED=true
+  fi
+elif command -v bun >/dev/null 2>&1; then
+  printf "    Installing globally via ${BOLD}bun${NC}...\n"
+  if bun add -g "${PACKAGE_NAME}@${VERSION}"; then
+    INSTALLED=true
+  fi
+elif command -v npm >/dev/null 2>&1; then
+  printf "    Installing globally via ${BOLD}npm${NC}...\n"
+  if npm install -g "${PACKAGE_NAME}@${VERSION}"; then
+    INSTALLED=true
   fi
 fi
 
-TARGET_BIN="${INSTALL_DIR}/${BINARY_NAME}"
-printf "    Installing binary to: ${BOLD}${TARGET_BIN}${NC}\n"
-
-if [ -n "${USE_SUDO}" ]; then
-  ${USE_SUDO} mkdir -p "${INSTALL_DIR}"
-  ${USE_SUDO} mv "${TMP_FILE}" "${TARGET_BIN}"
-  ${USE_SUDO} chmod +x "${TARGET_BIN}"
-else
-  mkdir -p "${INSTALL_DIR}"
-  mv "${TMP_FILE}" "${TARGET_BIN}"
-  chmod +x "${TARGET_BIN}"
+if [ "${INSTALLED}" = false ]; then
+  printf "${RED}Error: Failed to install ${PACKAGE_NAME}. Please ensure npm, pnpm, or bun is installed and configured.${NC}\n" >&2
+  exit 1
 fi
 
-# 6. Verify Installation
+# 3. Verify Installation
 if command -v pubctl >/dev/null 2>&1; then
   printf "${GREEN}✓ Successfully installed pubctl!${NC}\n"
 else
-  printf "${GREEN}✓ Installed to ${TARGET_BIN}${NC}\n"
-  if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-    printf "${YELLOW}! Warning: ${INSTALL_DIR} is not in your PATH.${NC}\n"
-    printf "  Add it by running: export PATH=\"${INSTALL_DIR}:\$PATH\"\n"
-  fi
+  printf "${YELLOW}! Warning: pubctl was installed, but 'pubctl' command was not found in your PATH.${NC}\n"
+  printf "  Ensure your global bin directory is in your PATH (e.g., ~/.local/share/pnpm, ~/.bun/bin, or $(npm config get prefix)/bin).\n"
 fi
 
-# 7. Check Docker Availability
+# 4. Check Docker Availability
 if command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then
     printf "${GREEN}✓ Docker daemon is active and accessible.${NC}\n"

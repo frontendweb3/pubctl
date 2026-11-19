@@ -7,7 +7,13 @@ settings:
 importers:
 
   .:
-    dependencies:
+    devDependencies:
+      '@types/dockerode':
+        specifier: ^3.3.29
+        version: 3.3.47
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
       chalk:
         specifier: ^4.1.2
         version: 4.1.2
@@ -23,13 +29,6 @@ importers:
       ora:
         specifier: ^5.4.1
         version: 5.4.1
-    devDependencies:
-      '@types/dockerode':
-        specifier: ^3.3.29
-        version: 3.3.47
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.43
       typescript:
         specifier: ^5.4.0
         version: 5.9.3

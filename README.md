@@ -2,10 +2,10 @@
 
 > **Zero-configuration, multi-tenant CLI and Docker orchestrator for self-hosting Ghost CMS across any cloud provider.**
 
-[![Status: Beta](https://img.shields.io/badge/Status-Beta-orange.svg)](https://github.com/officialrajdeepsingh/pubctl)
+[![Status: Beta](https://img.shields.io/badge/Status-Beta-orange.svg)](https://github.com/frontendweb3/pubctl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](#prerequisites)
-[![Bun](https://img.shields.io/badge/Bun-Compiled_Binary-fbf0df?logo=bun&logoColor=black)](#installation)
+[![npm](https://img.shields.io/npm/v/pubctl.svg?color=CB3837&logo=npm)](https://www.npmjs.com/package/pubctl)
 
 > [!IMPORTANT]
 > **Beta Stage Notice**: `pubctl` is currently in active beta. Core orchestration features (Traefik SSL, isolated MySQL, S3 storage, backups, and standalone binary execution) are operational, but commands, flags, and configuration formats may evolve before the stable release. Please report issues, feedback, or feature requests on GitHub!
@@ -22,27 +22,15 @@
 - 🔑 **Headless Zero-Touch Setup**: Automatically bootstraps the Ghost admin account and password, bypassing manual setup screens.
 - 📦 **Point-in-Time Backups**: Temporarily pauses a tenant while its MySQL dump and content archive are created.
 - 🔄 **Recoverable Updates**: Restores the previous container automatically if a replacement fails to start.
-- 🚀 **Zero Runtime Dependencies**: Distributed as a single, self-contained native binary compiled with Bun—no Node.js or npm required on target hosts.
+- 🚀 **Zero Runtime Dependencies**: Distributed as a single, self-contained bundle on npm with zero external subdependencies.
 
 ---
 
 ## 📥 Installation
 
-### Option 1: One-Line Installer (Recommended)
+### Option 1: Global Install via `pnpm` or `npm` (Recommended)
 
-Installs the standalone native binary to `/usr/local/bin/pubctl` with zero dependencies:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/officialrajdeepsingh/pubctl/main/install.sh | bash
-```
-
-> **Note:** Works on Linux (x64 & ARM64) and macOS. Requires only Docker to be installed.
-
----
-
-### Option 2: Global Install via `npm` or `pnpm`
-
-If you have Node.js (v18+) installed:
+Requires Node.js (v18+) or Bun:
 
 ```bash
 # Using pnpm
@@ -54,15 +42,27 @@ npm install -g pubctl
 
 ---
 
-### Option 3: Manual Binary Download
+### Option 2: Instant Run via `npx` or `pnpm dlx`
 
-Download pre-compiled binaries directly from [GitHub Releases](https://github.com/officialrajdeepsingh/pubctl/releases):
+Run commands instantly without installing globally:
 
 ```bash
-# Example for Linux x64
-curl -sSL -o pubctl https://github.com/officialrajdeepsingh/pubctl/releases/latest/download/pubctl-linux-x64
-chmod +x pubctl
-sudo mv pubctl /usr/local/bin/
+# Using npx
+npx pubctl --help
+
+# Using pnpm
+pnpm dlx pubctl --help
+```
+
+---
+
+### Option 3: One-Line Installer Script
+
+Installs `pubctl` directly to `/usr/local/bin/pubctl`:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/frontendweb3/pubctl/main/install.sh | bash
+```
 ```
 
 ---

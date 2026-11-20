@@ -1,6 +1,7 @@
 {
   "name": "pubctl",
   "version": "0.1.2",
+  "type": "module",
   "description": "Zero-config Docker orchestrator for Ghost CMS",
   "license": "MIT",
   "author": "Rajdeep Singh",
@@ -33,7 +34,6 @@
     "pubctl": "dist/index.js"
   },
   "scripts": {
-
     "typecheck": "tsc --noEmit",
     "build": "rm -rf dist && tsc --noEmit && bun build src/index.ts --target=node --outfile=dist/index.js --minify --external cpu-features",
     "bundle": "bun build src/index.ts --target=node --outfile=dist/index.js --minify --external cpu-features",
@@ -51,10 +51,11 @@
     "@types/dockerode": "^3.3.29",
     "@types/node": "^20.0.0",
     "chalk": "^4.1.2",
-    "commander": "^12.0.0",
     "dockerode": "^4.0.2",
     "mysql2": "^3.9.0",
     "ora": "^5.4.1",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "zod": "^4.6.7",
+    "zodline": "^0.4.0"
   }
 }

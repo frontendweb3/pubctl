@@ -17,9 +17,6 @@ importers:
       chalk:
         specifier: ^4.1.2
         version: 4.1.2
-      commander:
-        specifier: ^12.0.0
-        version: 12.1.0
       dockerode:
         specifier: ^4.0.2
         version: 4.0.12(supports-color@7.2.0)
@@ -32,6 +29,12 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+      zodline:
+        specifier: ^0.4.0
+        version: 0.4.0(zod@4.6.7)
 
 packages:
 
@@ -157,10 +160,6 @@ packages:
 
   color-name@1.1.4:
     resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
-
-  commander@12.1.0:
-    resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
-    engines: {node: '>=18'}
 
   cpu-features@0.0.10:
     resolution: {integrity: sha512-9IkYqtX3YHPCzoVg1Py+o9057a3i0fp7S530UWokCSaFVTc7CwXPRiOjRjBQQ18ZCNafx78YfnG+HALxtVmOGA==}
@@ -388,6 +387,15 @@ packages:
     resolution: {integrity: sha512-GZtjxm/J/4TSxuL3FNYjCmLktBTnIw/rVmKSIyKeYAZpmJB2ig9VauCC5xsa82GNKVKDAqpOn3KVzNt0zmrU0g==}
     engines: {node: '>=12'}
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
+  zodline@0.4.0:
+    resolution: {integrity: sha512-oKpe5Iy66OoUCg/cw8E6mKFj3XdY3Cv7juHdP7QZeuHgaT7jLv8DZjmdCukWj8RR2UgrMmjYA9UcdpEO8cpWeQ==}
+    engines: {node: '>=16.0.0'}
+    peerDependencies:
+      zod: ^4.0.0
+
 snapshots:
 
   '@balena/dockerignore@1.0.2': {}
@@ -514,8 +522,6 @@ snapshots:
       color-name: 1.1.4
 
   color-name@1.1.4: {}
-
-  commander@12.1.0: {}
 
   cpu-features@0.0.10:
     dependencies:
@@ -763,3 +769,9 @@ snapshots:
       string-width: 4.2.3
       y18n: 5.0.8
       yargs-parser: 21.1.1
+
+  zod@4.6.7: {}
+
+  zodline@0.4.0(zod@4.6.7):
+    dependencies:
+      zod: 4.6.7

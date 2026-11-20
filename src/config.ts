@@ -44,7 +44,8 @@ export const CONFIG = {
   // Image defaults
   DEFAULT_GHOST_VERSION,
   DEFAULT_MYSQL_IMAGE: 'mysql:8.0',
-  DEFAULT_TRAEFIK_IMAGE: 'traefik:v3.1',
+  // Use Traefik latest (v3.7+) with Docker API negotiation support for Docker Engine 29+ compatibility
+  DEFAULT_TRAEFIK_IMAGE: 'traefik:latest',
   DEFAULT_BACKUP_IMAGE: 'alpine',
 
   // Storage adapter defaults

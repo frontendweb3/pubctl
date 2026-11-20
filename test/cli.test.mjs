@@ -1,7 +1,28 @@
+/**
+ * Test Suite for `pubctl` CLI & Docker Orchestration Engine
+ *
+ * Verifies:
+ * - Semantic input validation (tenant names, domains, RFC email compliance)
+ * - Configuration naming conventions and Docker label namespacing
+ * - Strict Zod validation schemas for all commands (init, create, backup, update, delete)
+ * - Local development mode requirements (theme folder mounting, .localhost domain resolution)
+ * - Zodline command parsing, options, and shorthand aliases
+ * - Argument normalization for snake_case and uppercase flags
+ */
+
 import assert from 'node:assert/strict';
 import test, { describe, it } from 'node:test';
+import { processConfig, ZodlineError } from 'zodline';
 import { validateDomain, validateEmail, validateTenantName } from '../src/validation.ts';
 import { APP_NAME, CONFIG } from '../src/config.ts';
+import {
+  initStrictSchema,
+  createStrictSchema,
+  backupStrictSchema,
+  updateStrictSchema,
+  deleteStrictSchema,
+} from '../src/schemas/index.ts';
+import { config, normalizeArgv } from '../src/index.ts';
 
 describe('Validation Tests', () => {
   describe('validateTenantName', () => {
@@ -32,6 +53,8 @@ describe('Validation Tests', () => {
       assert.doesNotThrow(() => validateDomain('deep.sub.domain.org'));
       assert.doesNotThrow(() => validateDomain('ghost.internal.io'));
       assert.doesNotThrow(() => validateDomain('site.co.uk'));
+      assert.doesNotThrow(() => validateDomain('techblog.localhost', true));
+      assert.doesNotThrow(() => validateDomain('localhost', true));
     });
 
     it('rejects invalid domains, protocols, ports, and paths', () => {
@@ -89,5 +112,265 @@ describe('Config & Naming Helpers', () => {
     assert.equal(CONFIG.LABELS.VERSION, 'pubctl.version');
     assert.equal(CONFIG.LABELS.STORAGE, 'pubctl.storage');
     assert.equal(CONFIG.LABELS.MANAGED_BY, 'pubctl.managed-by');
+  });
+});
+
+describe('Zod Schemas Validation', () => {
+  it('validates initStrictSchema properly', () => {
+    const valid = initStrictSchema.parse({
+      name: 'pubctl',
+      email: 'admin@example.com',
+      mysqlRootPassword: 'secretpassword123',
+    });
+    assert.equal(valid.name, 'pubctl');
+    assert.equal(valid.email, 'admin@example.com');
+
+    assert.throws(() => initStrictSchema.parse({
+      name: '',
+      email: 'invalid-email',
+      mysqlRootPassword: '',
+    }));
+  });
+
+  it('validates createStrictSchema with local storage', () => {
+    const valid = createStrictSchema.parse({
+      name: 'myblog',
+      domain: 'blog.example.com',
+      adminEmail: 'admin@example.com',
+      title: 'Tech Blog',
+      version: '5-alpine',
+      mysqlRootPassword: 'secretpassword123',
+      storage: 'local',
+    });
+    assert.equal(valid.name, 'myblog');
+    assert.equal(valid.storage, 'local');
+
+    // Missing S3 credentials when storage is s3
+    assert.throws(() => createStrictSchema.parse({
+      name: 'myblog',
+      domain: 'blog.example.com',
+      adminEmail: 'admin@example.com',
+      mysqlRootPassword: 'secretpassword123',
+      storage: 's3',
+    }));
+  });
+
+  it('validates createStrictSchema with valid s3 storage', () => {
+    const valid = createStrictSchema.parse({
+      name: 'myblog',
+      domain: 'blog.example.com',
+      adminEmail: 'admin@example.com',
+      mysqlRootPassword: 'secretpassword123',
+      storage: 's3',
+      s3Bucket: 'ghost-bucket',
+      s3Key: 'access-key-id',
+      s3Secret: 'secret-access-key',
+    });
+    assert.equal(valid.storage, 's3');
+    assert.equal(valid.s3Bucket, 'ghost-bucket');
+  });
+
+  it('validates createStrictSchema in local mode for theme development', () => {
+    const valid = createStrictSchema.parse({
+      name: 'localblog',
+      domain: 'localblog.localhost',
+      adminEmail: 'admin@example.com',
+      mysqlRootPassword: 'secretpassword123',
+      local: true,
+      themeDir: './src', // existing dir for test
+    });
+    assert.equal(valid.local, true);
+    assert.equal(valid.domain, 'localblog.localhost');
+
+    // Rejects non-existent theme directory
+    assert.throws(() => createStrictSchema.parse({
+      name: 'localblog',
+      domain: 'localblog.localhost',
+      adminEmail: 'admin@example.com',
+      mysqlRootPassword: 'secretpassword123',
+      local: true,
+      themeDir: './non-existent-theme-path-xyz',
+    }), /Theme directory/);
+  });
+
+  it('validates backupStrictSchema', () => {
+    const valid = backupStrictSchema.parse({
+      name: 'myblog',
+      output: './backups',
+      mysqlRootPassword: 'secretpassword123',
+    });
+    assert.equal(valid.name, 'myblog');
+
+    assert.throws(() => backupStrictSchema.parse({
+      name: 'Invalid_Name_With_Capital',
+      output: '',
+      mysqlRootPassword: '',
+    }));
+  });
+
+  it('validates updateStrictSchema', () => {
+    const valid = updateStrictSchema.parse({
+      name: 'myblog',
+      to: '6-alpine',
+    });
+    assert.equal(valid.to, '6-alpine');
+
+    assert.throws(() => updateStrictSchema.parse({
+      name: 'myblog',
+      to: '',
+    }));
+  });
+
+  it('validates deleteStrictSchema', () => {
+    const valid = deleteStrictSchema.parse({
+      name: 'myblog',
+      keepData: false,
+      mysqlRootPassword: 'rootpassword',
+      yes: true,
+    });
+    assert.equal(valid.name, 'myblog');
+
+    // If keepData is false, mysqlRootPassword is required
+    assert.throws(() => deleteStrictSchema.parse({
+      name: 'myblog',
+      keepData: false,
+      yes: true,
+    }));
+
+    // If keepData is true, mysqlRootPassword is not required
+    assert.doesNotThrow(() => deleteStrictSchema.parse({
+      name: 'myblog',
+      keepData: true,
+      yes: true,
+    }));
+  });
+});
+
+describe('Zodline CLI Flag Parsing', () => {
+  it('parses create command flags and short aliases correctly', () => {
+    const result = processConfig(config, [
+      'create',
+      '-n', 'techblog',
+      '-d', 'blog.example.com',
+      '-e', 'admin@example.com',
+      '-t', 'My Cool Tech Blog',
+      '--mysql-root-password', 'secret123',
+      '--storage', 'local',
+      '-l',
+      '--no-interactive',
+    ]);
+
+    assert.equal(result.options.name, 'techblog');
+    assert.equal(result.options.domain, 'blog.example.com');
+    assert.equal(result.options.adminEmail, 'admin@example.com');
+    assert.equal(result.options.title, 'My Cool Tech Blog');
+    assert.equal(result.options.mysqlRootPassword, 'secret123');
+    assert.equal(result.options.storage, 'local');
+    assert.equal(result.options.local, true);
+    assert.equal(result.options.noInteractive, true);
+  });
+
+  it('parses backup command flags and aliases', () => {
+    const result = processConfig(config, [
+      'backup',
+      '-n', 'techblog',
+      '-o', '/tmp/my-backups',
+      '--mysql-root-password', 'secret123',
+    ]);
+
+    assert.equal(result.options.name, 'techblog');
+    assert.equal(result.options.output, '/tmp/my-backups');
+    assert.equal(result.options.mysqlRootPassword, 'secret123');
+  });
+
+  it('parses update command flags and aliases', () => {
+    const result = processConfig(config, [
+      'update',
+      '-n', 'techblog',
+      '-t', '6-alpine',
+    ]);
+
+    assert.equal(result.options.name, 'techblog');
+    assert.equal(result.options.to, '6-alpine');
+  });
+
+  it('parses delete command flags and aliases', () => {
+    const result = processConfig(config, [
+      'delete',
+      '-n', 'techblog',
+      '--keep-data',
+      '-y',
+    ]);
+
+    assert.equal(result.options.name, 'techblog');
+    assert.equal(result.options.keepData, true);
+    assert.equal(result.options.yes, true);
+  });
+
+  it('throws ZodlineError for unknown command', () => {
+    assert.throws(() => processConfig(config, ['unknown-command']), (err) => {
+      return err instanceof ZodlineError;
+    });
+  });
+
+  it('throws ZodlineError for unknown option flag', () => {
+    assert.throws(() => processConfig(config, ['create', '--non-existent-flag', 'value']), (err) => {
+      return err instanceof ZodlineError;
+    });
+  });
+
+  describe('normalizeArgv flag normalization', () => {
+    it('normalizes snake_case flags to kebab-case while preserving values', () => {
+      const normalized = normalizeArgv([
+        'create',
+        '--name', 'my_tenant_name',
+        '--domain', 'blog.example.com',
+        '--admin_email', 'admin@example.com',
+        '--title', 'My_Cool_Blog',
+        '--mysql_root_password', 'secret_root_123',
+        '--no_interactive',
+      ]);
+
+      assert.deepEqual(normalized, [
+        'create',
+        '--name', 'my_tenant_name',
+        '--domain', 'blog.example.com',
+        '--admin-email', 'admin@example.com',
+        '--title', 'My_Cool_Blog',
+        '--mysql-root-password', 'secret_root_123',
+        '--no-interactive',
+      ]);
+    });
+
+    it('normalizes uppercase and equals-style flags', () => {
+      const normalized = normalizeArgv([
+        'create',
+        '--MYSQL_ROOT_PASSWORD=secret_pass',
+        '--KEEP_DATA',
+      ]);
+
+      assert.deepEqual(normalized, [
+        'create',
+        '--mysql-root-password=secret_pass',
+        '--keep-data',
+      ]);
+    });
+
+    it('successfully parses command with --mysql_root_password after normalization', () => {
+      const args = normalizeArgv([
+        'create',
+        '--name', 'techblog',
+        '--domain', 'blog.example.com',
+        '--admin-email', 'radewala.2@gmail.com',
+        '--title', 'My Tech Blog',
+        '--mysql_root_password', 'RsJagjeet1997',
+      ]);
+
+      const result = processConfig(config, args);
+      assert.equal(result.options.name, 'techblog');
+      assert.equal(result.options.mysqlRootPassword, 'RsJagjeet1997');
+      assert.equal(result.options.domain, 'blog.example.com');
+      assert.equal(result.options.title, 'My Tech Blog');
+    });
   });
 });

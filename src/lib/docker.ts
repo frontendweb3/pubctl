@@ -13,9 +13,30 @@ import { PassThrough } from 'stream';
 import { CONFIG } from '../config.js';
 
 /**
- * Shared Docker client connected to the configured Docker socket.
+ * Instantiates the Docker client with support for Unix domain sockets,
+ * Windows named pipes, and TCP/HTTP host configurations.
  */
-export const docker = new Docker({ socketPath: CONFIG.DOCKER_SOCKET_PATH });
+function createDockerClient(): Docker {
+  const socketOrHost = CONFIG.DOCKER_SOCKET_PATH;
+  if (
+    socketOrHost.startsWith('tcp://') ||
+    socketOrHost.startsWith('http://') ||
+    socketOrHost.startsWith('https://')
+  ) {
+    const url = new URL(socketOrHost.replace(/^tcp:/, 'http:'));
+    return new Docker({
+      host: url.hostname,
+      port: Number(url.port) || 2375,
+      protocol: socketOrHost.startsWith('https://') ? 'https' : 'http',
+    });
+  }
+  return new Docker({ socketPath: socketOrHost });
+}
+
+/**
+ * Shared Docker client connected to the configured Docker daemon.
+ */
+export const docker = createDockerClient();
 
 /**
  * Retrieves the MySQL root password from environment variables.

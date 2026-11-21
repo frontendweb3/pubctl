@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import test, { describe, it } from 'node:test';
 import { processConfig, ZodlineError } from 'zodline';
 import { validateDomain, validateEmail, validateTenantName } from '../src/validation.ts';
-import { APP_NAME, CONFIG } from '../src/config.ts';
+import { APP_NAME, CONFIG, resolveDockerSocket } from '../src/config.ts';
 import {
   initStrictSchema,
   createStrictSchema,
@@ -112,6 +112,50 @@ describe('Config & Naming Helpers', () => {
     assert.equal(CONFIG.LABELS.VERSION, 'pubctl.version');
     assert.equal(CONFIG.LABELS.STORAGE, 'pubctl.storage');
     assert.equal(CONFIG.LABELS.MANAGED_BY, 'pubctl.managed-by');
+  });
+
+  describe('resolveDockerSocket & Multi-Platform Resolution', () => {
+    it('prioritizes explicit DOCKER_SOCKET override', () => {
+      const socket = resolveDockerSocket({ DOCKER_SOCKET: '/custom/docker.sock' });
+      assert.equal(socket, '/custom/docker.sock');
+    });
+
+    it('resolves DOCKER_HOST with unix:// scheme', () => {
+      const socket = resolveDockerSocket({ DOCKER_HOST: 'unix:///var/run/custom.sock' });
+      assert.equal(socket, '/var/run/custom.sock');
+    });
+
+    it('resolves DOCKER_HOST with npipe:// scheme', () => {
+      const socket = resolveDockerSocket({ DOCKER_HOST: 'npipe:////./pipe/custom_pipe' });
+      assert.equal(socket, '//./pipe/custom_pipe');
+    });
+
+    it('defaults to Windows named pipe on win32 when no env is set', () => {
+      const socket = resolveDockerSocket({}, 'win32');
+      assert.equal(socket, '//./pipe/docker_engine');
+    });
+
+    it('falls back to standard /var/run/docker.sock on macOS and Linux when special paths are absent', () => {
+      const macSocket = resolveDockerSocket({ HOME: '/nonexistent/path' }, 'darwin');
+      assert.equal(macSocket, '/var/run/docker.sock');
+
+      const linuxSocket = resolveDockerSocket({ XDG_RUNTIME_DIR: '/nonexistent/dir' }, 'linux');
+      assert.equal(linuxSocket, '/var/run/docker.sock');
+    });
+
+    it('dynamically reflects DOCKER_SOCKET via CONFIG.DOCKER_SOCKET_PATH getter', () => {
+      const prev = process.env.DOCKER_SOCKET;
+      try {
+        process.env.DOCKER_SOCKET = '/tmp/test-pubctl-dynamic.sock';
+        assert.equal(CONFIG.DOCKER_SOCKET_PATH, '/tmp/test-pubctl-dynamic.sock');
+      } finally {
+        if (prev !== undefined) {
+          process.env.DOCKER_SOCKET = prev;
+        } else {
+          delete process.env.DOCKER_SOCKET;
+        }
+      }
+    });
   });
 });
 

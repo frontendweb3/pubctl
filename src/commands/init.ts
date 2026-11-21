@@ -155,6 +155,12 @@ export const initCommand = defineCommand({
       const startNewTraefik = async () => {
         spinner.text = `Configuring Traefik (${CONFIG.DEFAULT_TRAEFIK_IMAGE}) with automated SSL & local HTTP support...`;
         await pullImage(CONFIG.DEFAULT_TRAEFIK_IMAGE);
+        // On Windows named pipes, Docker Desktop bridges Linux container mounts to /var/run/docker.sock
+        const traefikSocketMount =
+          CONFIG.DOCKER_SOCKET_PATH.startsWith('//./pipe/') || CONFIG.DOCKER_SOCKET_PATH.startsWith('\\\\.\\pipe\\')
+            ? '/var/run/docker.sock'
+            : CONFIG.DOCKER_SOCKET_PATH;
+
         const traefikContainer = await docker.createContainer({
           Image: CONFIG.DEFAULT_TRAEFIK_IMAGE,
           name: proxyContainer,
@@ -167,7 +173,7 @@ export const initCommand = defineCommand({
               '443/tcp': [{ HostPort: '443' }],
             },
             Binds: [
-              `${CONFIG.DOCKER_SOCKET_PATH}:/var/run/docker.sock:ro`,
+              `${traefikSocketMount}:/var/run/docker.sock:ro`,
               `${certsVolume}:/letsencrypt`,
             ],
             NetworkMode: networkName,

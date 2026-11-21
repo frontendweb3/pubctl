@@ -1,6 +1,6 @@
 {
   "name": "pubctl",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "description": "Zero-config Docker orchestrator for Ghost CMS",
   "license": "MIT",
